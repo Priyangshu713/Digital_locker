@@ -1,0 +1,23 @@
+/* Toast notification z-index fix */
+[data-sonner-toaster] {
+  z-index: 9999 !important;
+}
+
+[data-sonner-toast] {
+  z-index: 9999 !important;
+}
+
+/* Ensure toast container is above all other elements */
+.sonner-toast-container {
+  z-index: 9999 !important;
+}
+
+/* Override any conflicting z-index values */
+.toast-viewport {
+  z-index: 9999 !important;
+}
+
+/* Make sure toasts appear above modals and headers */
+.toast {
+  z-index: 9999 !important;
+}
