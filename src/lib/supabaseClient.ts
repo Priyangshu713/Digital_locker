@@ -48,18 +48,54 @@ export async function uploadDocument(userId: string, file: File, name: string, c
 export async function moveToTrash(userId: string, path: string) {
   const filename = path.split("/").pop();
   const dest = `${userId}/trash/${filename}`;
+  
+  // Copy to trash
   const { error: copyErr } = await supabase.storage.from("documents").copy(path, dest);
   if (copyErr) throw copyErr;
+  
+  // Remove from original location
   const { error: delErr } = await supabase.storage.from("documents").remove([path]);
   if (delErr) throw delErr;
+  
+  // Clean up database references
+  await cleanupDocumentReferences(userId, path);
+  
+  // Track in deleted_documents table
+  const { error: trackErr } = await supabase
+    .from('deleted_documents')
+    .upsert({
+      user_id: userId,
+      document_path: path,
+      document_name: filename || 'unknown'
+    });
+  
+  if (trackErr) {
+    console.warn('Failed to track deleted document:', trackErr);
+  }
 }
 
 export async function restoreFromTrash(userId: string, filename: string) {
   const src = `${userId}/trash/${filename}`;
   const dest = `${userId}/${Date.now()}_${filename}`;
+  
+  // Copy from trash back to main location
   const { error: copyErr } = await supabase.storage.from("documents").copy(src, dest);
   if (copyErr) throw copyErr;
+  
+  // Remove from trash
   await supabase.storage.from("documents").remove([src]);
+  
+  // Remove from deleted_documents tracking since it's restored
+  const { error: trackErr } = await supabase
+    .from('deleted_documents')
+    .delete()
+    .eq('user_id', userId)
+    .eq('document_path', src);
+  
+  if (trackErr) {
+    console.warn('Failed to remove from deleted documents tracking:', trackErr);
+  }
+  
   const { data } = supabase.storage.from("documents").getPublicUrl(dest);
   return { path: dest, publicUrl: data.publicUrl };
 }
@@ -79,7 +115,52 @@ export async function listUserTrash(userId: string) {
 }
 
 export async function deletePermanent(path: string) {
+  // Remove from storage
   await supabase.storage.from("documents").remove([path]);
+  
+  // Clean up database references
+  const userId = path.split('/')[0];
+  await cleanupDocumentReferences(userId, path);
+}
+
+// Helper function to clean up database references when a document is deleted
+async function cleanupDocumentReferences(userId: string, documentPath: string) {
+  try {
+    // Remove from smart folder assignments
+    const { error: assignmentErr } = await supabase
+      .from('smart_folder_assignments')
+      .delete()
+      .eq('user_id', userId)
+      .eq('document_path', documentPath);
+    
+    if (assignmentErr) {
+      console.warn('Failed to clean up folder assignments:', assignmentErr);
+    }
+    
+    // Remove from document shares
+    const { error: shareErr } = await supabase
+      .from('document_shares')
+      .delete()
+      .eq('user_id', userId)
+      .eq('document_path', documentPath);
+    
+    if (shareErr) {
+      console.warn('Failed to clean up document shares:', shareErr);
+    }
+    
+    // Remove from deleted_documents tracking
+    const { error: deletedErr } = await supabase
+      .from('deleted_documents')
+      .delete()
+      .eq('user_id', userId)
+      .eq('document_path', documentPath);
+    
+    if (deletedErr) {
+      console.warn('Failed to clean up deleted documents tracking:', deletedErr);
+    }
+  } catch (error) {
+    console.error('Error cleaning up document references:', error);
+  }
 }
 
 export async function purgeOldTrash(userId: string, days = 30) {

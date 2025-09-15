@@ -27,7 +27,6 @@ interface DocumentCardProps {
   onView: (doc: Document) => void;
   onDownload: (doc: Document) => void;
   onPrint: (doc: Document) => void;
-  onDelete: (id: string) => void;
   onShare?: (doc: Document) => void;
 }
 
@@ -132,7 +131,7 @@ const getPreviewContent = (document: Document) => {
   );
 };
 
-const DocumentCard = ({ document, onView, onDownload, onPrint, onDelete, onShare }: DocumentCardProps) => {
+const DocumentCard = ({ document, onView, onDownload, onPrint, onShare }: DocumentCardProps) => {
   console.log('DocumentCard rendering for:', document.name, 'type:', document.type);
   
   return (
@@ -219,17 +218,6 @@ const DocumentCard = ({ document, onView, onDownload, onPrint, onDelete, onShare
                     </DropdownMenuItem>
                   </div>
                 )}
-                <DropdownMenuItem 
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onDelete(document.id);
-                  }} 
-                  className="text-red-600 rounded-lg"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete
-                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

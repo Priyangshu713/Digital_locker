@@ -167,7 +167,7 @@ const Index = () => {
             const { publicUrl, path } = await uploadDocument(user.id, file, name, category, isPrivate);
 
       const newDocument: Document = {
-        id: Date.now().toString(),
+        id: path, // Use path as ID to match loaded documents
         name,
         type: file.name.split(".").pop() || "unknown",
         category,
@@ -338,11 +338,23 @@ const Index = () => {
   const handleDelete = async (id: string) => {
     if (!user) return;
 
+    console.log('=== DELETE OPERATION START ===');
+    console.log('Delete ID:', id);
+    console.log('All documents:', documents.map(d => ({ id: d.id, name: d.name, path: d.path })));
+    console.log('All trash docs:', trashDocs.map(d => ({ id: d.id, name: d.name, path: d.path })));
+
     // locate document in either list
     const doc = documents.find((d) => d.id === id);
     const trashDoc = trashDocs.find((d) => d.id === id);
     const foundDoc = doc || trashDoc;
-    if (!foundDoc) return;
+    
+    console.log('Found doc:', foundDoc);
+    
+    if (!foundDoc) {
+      console.error('Document not found with ID:', id);
+      toast({ title: 'Error', description: 'Document not found', variant: 'destructive' });
+      return;
+    }
 
     // Private docs: immediate permanent delete
     if (foundDoc.category === 'private') {
@@ -350,11 +362,15 @@ const Index = () => {
         return;
       }
       try {
-        await deletePermanent(`${user.id}/${id}`);
-        setDocuments((prev) => prev.filter((d) => d.id !== id));
-        toast({ title: 'Private document deleted permanently', description: doc.name });
+        const pathToDelete = foundDoc.path || foundDoc.id;
+        console.log('Deleting private document at path:', pathToDelete);
+        await deletePermanent(pathToDelete);
+        
+        await loadDocuments();
+        
+        toast({ title: 'Private document deleted permanently', description: foundDoc.name });
       } catch (e) {
-        console.error(e);
+        console.error('Private delete error:', e);
         toast({ title: 'Delete failed', description: (e as Error).message, variant: 'destructive' });
       }
       return;
@@ -364,48 +380,37 @@ const Index = () => {
       if (!window.confirm(`Permanently delete "${foundDoc.name}"? This action cannot be undone.`)) {
         return;
       }
-      const trashDoc = trashDocs.find((d) => d.id === id);
-      if (!trashDoc) return;
       try {
-        console.log('Attempting to delete:', trashDoc.id);
-        await deletePermanent(`${user.id}/${trashDoc.id}`);
+        const pathToDelete = foundDoc.path || foundDoc.id;
+        console.log('Permanently deleting trash document at path:', pathToDelete);
         
-        // Refresh trash list from backend to ensure sync
-        await loadDocuments(); // This will reload both documents and trash
+        await deletePermanent(pathToDelete);
+        await loadDocuments();
         
-        toast({ title: 'Deleted permanently', description: trashDoc.name });
+        toast({ title: 'Deleted permanently', description: foundDoc.name });
       } catch (e) {
-        console.error('Delete error:', e);
+        console.error('Permanent delete error:', e);
         toast({ title: 'Delete failed', description: (e as Error).message, variant: 'destructive' });
       }
     } else {
-      const doc = documents.find((d) => d.id === id);
-      if (!doc) return;
       try {
-        console.log('Attempting to delete document:', {
-          id: doc.id,
-          name: doc.name,
-          path: doc.path,
-          userId: user.id
-        });
-        console.log('About to call moveToTrash with:', { userId: user.id, path: doc.path });
-        await moveToTrash(user.id, doc.path!);
+        const pathToTrash = foundDoc.path || foundDoc.id;
+        console.log('Moving document to trash, path:', pathToTrash);
+        
+        await moveToTrash(user.id, pathToTrash);
         console.log('moveToTrash completed successfully');
         
-        // Reload documents from backend to ensure sync
-        console.log('Reloading documents after deletion...');
         await loadDocuments();
-        console.log('Documents reloaded');
+        console.log('Documents reloaded after trash operation');
         
-        // Only update UI state after successful backend operations
-        setDocuments((prev) => prev.filter((d) => d.id !== id));
-        
-        toast({ title: 'Document deleted permanently', description: doc.name });
+        toast({ title: 'Document moved to trash', description: foundDoc.name });
       } catch (e) {
-        console.error(e);
+        console.error('Move to trash error:', e);
         toast({ title: 'Delete failed', description: (e as Error).message, variant: 'destructive' });
       }
     }
+    
+    console.log('=== DELETE OPERATION END ===');
   };
 
   const handleRestore = async (id: string) => {
@@ -413,10 +418,24 @@ const Index = () => {
     const doc = trashDocs.find((d) => d.id === id);
     if (!doc) return;
     try {
-      // Use the document ID for restoration
-      await restoreFromTrash(user.id, doc.id);
-      setTrashDocs(prev => prev.filter(d => d.id !== id));
+      // Extract filename from the trash document path or use the name
+      const filename = doc.path ? doc.path.split('/').pop() : doc.name;
+      if (!filename) {
+        throw new Error('Unable to determine filename for restoration');
+      }
+      
+      console.log('Attempting to restore document:', {
+        id: doc.id,
+        name: doc.name,
+        path: doc.path,
+        filename: filename
+      });
+      
+      await restoreFromTrash(user.id, filename);
+      
+      // Reload documents to ensure sync
       await loadDocuments();
+      
       toast({ title: 'Restored', description: doc.name });
     } catch (e) {
       console.error(e);
@@ -1370,7 +1389,6 @@ Focus on grouping documents that likely come from the same source or serve simil
                                     onView={handleView}
                                     onDownload={handleDownload}
                                     onPrint={handlePrint}
-                                    onDelete={handleDelete}
                                     onShare={(doc) => setShareDialog({ isOpen: true, document: doc })}
                                   />
                                 </div>
@@ -1451,7 +1469,6 @@ Focus on grouping documents that likely come from the same source or serve simil
                           onView={handleView}
                           onDownload={handleDownload}
                           onPrint={handlePrint}
-                          onDelete={handleDelete}
                           onShare={(doc) => setShareDialog({ isOpen: true, document: doc })}
                         />
                       </div>

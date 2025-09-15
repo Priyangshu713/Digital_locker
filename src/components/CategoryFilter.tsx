@@ -54,12 +54,6 @@ const CategoryFilter = ({ selectedCategory, onCategoryChange, documentCounts }: 
       count: documentCounts.legal || 0,
     },
     {
-      value: "trash",
-      label: "Recently Deleted",
-      icon: <Trash2 className="w-4 h-4" />,
-      count: documentCounts.trash || 0,
-    },
-    {
       value: "other",
       label: "Other",
       icon: <FileText className="w-4 h-4" />,
