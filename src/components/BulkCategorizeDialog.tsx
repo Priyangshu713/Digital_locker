@@ -45,6 +45,7 @@ const BulkCategorizeDialog = ({
 }: BulkCategorizeDialogProps) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [currentDocument, setCurrentDocument] = useState<string>('');
   const [suggestions, setSuggestions] = useState<CategorySuggestionResult[]>([]);
   const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
 
@@ -64,11 +65,19 @@ const BulkCategorizeDialog = ({
   const analyzeAllDocuments = async () => {
     setIsAnalyzing(true);
     setProgress(0);
+    setCurrentDocument('');
     setSuggestions([]);
     setSelectedSuggestions(new Set());
 
     try {
-      const results = await bulkCategorizeDocuments(documents);
+      const results = await bulkCategorizeDocuments(
+        documents,
+        (processed, total, currentDoc) => {
+          const progressPercent = (processed / total) * 100;
+          setProgress(progressPercent);
+          setCurrentDocument(currentDoc);
+        }
+      );
       
       const suggestionsWithMetadata = results.map(result => {
         const doc = documents.find(d => d.path === result.path);
@@ -106,6 +115,7 @@ const BulkCategorizeDialog = ({
     } finally {
       setIsAnalyzing(false);
       setProgress(100);
+      setCurrentDocument('');
     }
   };
 
@@ -166,7 +176,7 @@ const BulkCategorizeDialog = ({
         
         <div className="flex-1 overflow-hidden flex flex-col space-y-4">
           {/* Analysis Controls */}
-          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+          <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
             <div>
               <p className="font-medium">Analyze {documents.length} documents</p>
               <p className="text-sm text-muted-foreground">
@@ -176,7 +186,7 @@ const BulkCategorizeDialog = ({
             <Button 
               onClick={analyzeAllDocuments}
               disabled={isAnalyzing}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-blue-600 hover:bg-blue-700 rounded-2xl"
             >
               {isAnalyzing ? (
                 <>
@@ -194,12 +204,17 @@ const BulkCategorizeDialog = ({
 
           {/* Progress Bar */}
           {isAnalyzing && (
-            <div className="space-y-2">
+            <div className="space-y-2 bg-blue-50 p-4 rounded-2xl">
               <div className="flex justify-between text-sm">
-                <span>Analyzing documents...</span>
+                <span>
+                  {currentDocument ? `Analyzing: ${currentDocument}` : 'Analyzing documents...'}
+                </span>
                 <span>{Math.round(progress)}%</span>
               </div>
               <Progress value={progress} className="w-full" />
+              <div className="text-xs text-gray-500 text-center">
+                Using Gemini 2.5 Flash Lite with conservative rate limiting. Processing 3 documents per batch with 500ms delays.
+              </div>
             </div>
           )}
 
@@ -211,10 +226,10 @@ const BulkCategorizeDialog = ({
                   Categorization Suggestions ({suggestions.length})
                 </h3>
                 <div className="space-x-2">
-                  <Button variant="outline" size="sm" onClick={selectAll}>
+                  <Button variant="outline" size="sm" onClick={selectAll} className="rounded-2xl">
                     Select All
                   </Button>
-                  <Button variant="outline" size="sm" onClick={selectNone}>
+                  <Button variant="outline" size="sm" onClick={selectNone} className="rounded-2xl">
                     Select None
                   </Button>
                 </div>
@@ -224,7 +239,7 @@ const BulkCategorizeDialog = ({
                 {suggestions.map((suggestion) => (
                   <div
                     key={suggestion.path}
-                    className={`border rounded-lg p-4 cursor-pointer transition-colors ${
+                    className={`border rounded-2xl p-4 cursor-pointer transition-colors ${
                       selectedSuggestions.has(suggestion.path)
                         ? "border-blue-500 bg-blue-50"
                         : "border-gray-200 hover:border-gray-300"
@@ -280,14 +295,14 @@ const BulkCategorizeDialog = ({
 
           {/* Action Buttons */}
           <div className="flex justify-end space-x-2 pt-4 border-t">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-2xl">
               Cancel
             </Button>
             {suggestions.length > 0 && (
               <Button 
                 onClick={applySelectedSuggestions}
                 disabled={selectedSuggestions.size === 0}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-blue-600 hover:bg-blue-700 rounded-2xl"
               >
                 Apply {selectedSuggestions.size} Suggestion{selectedSuggestions.size !== 1 ? 's' : ''}
               </Button>

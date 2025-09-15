@@ -112,7 +112,7 @@ Please respond with a JSON object containing:
 Focus on accuracy and provide a confidence score based on how certain you are about the categorization.
 `;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -292,7 +292,7 @@ Examples for Legal category:
 Respond with ONLY the subcategory name (2-3 words max, title case). Do not include quotes or explanations.
 `;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -421,7 +421,7 @@ If no folder is a good match, respond with:
 }
 `;
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -490,32 +490,161 @@ function findFallbackMatchingFolder(
 }
 
 export async function bulkCategorizeDocuments(
-  documents: Array<{ name: string; path: string; category: string }>
+  documents: Array<{ name: string; path: string; category: string }>,
+  onProgress?: (processed: number, total: number, currentDoc: string) => void
 ): Promise<Array<{ path: string; suggestedCategory: string; confidence: number; reasoning: string }>> {
   const results = [];
+  const BATCH_SIZE = 3; // Process 3 documents at a time for better rate limit control
+  const DELAY_BETWEEN_BATCHES = 2000; // 2 second delay between batches
+  const DELAY_BETWEEN_DOCS = 500; // 500ms delay between individual documents
+  const MAX_RETRIES = 2; // Fewer retries since lite model is more reliable
   
-  for (const doc of documents) {
-    try {
-      const suggestion = await categorizeDocument(doc.name);
-      results.push({
-        path: doc.path,
-        suggestedCategory: suggestion.category,
-        confidence: suggestion.confidence,
-        reasoning: suggestion.reasoning
-      });
+  // Process documents in small batches
+  for (let i = 0; i < documents.length; i += BATCH_SIZE) {
+    const batch = documents.slice(i, i + BATCH_SIZE);
+    
+    // Process each document in the batch sequentially
+    for (const doc of batch) {
+      let retries = 0;
+      let success = false;
       
-      // Add a small delay to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 100));
-    } catch (error) {
-      console.error(`Error categorizing ${doc.name}:`, error);
-      results.push({
-        path: doc.path,
-        suggestedCategory: "other",
-        confidence: 0.3,
-        reasoning: "Error occurred during categorization"
-      });
+      while (retries < MAX_RETRIES && !success) {
+        try {
+          onProgress?.(results.length, documents.length, doc.name);
+          
+          const suggestion = await categorizeDocumentWithRetry(doc.name, retries);
+          results.push({
+            path: doc.path,
+            suggestedCategory: suggestion.category,
+            confidence: suggestion.confidence,
+            reasoning: suggestion.reasoning
+          });
+          success = true;
+          
+          // Short delay between individual documents
+          if (results.length < documents.length) {
+            await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_DOCS));
+          }
+        } catch (error) {
+          retries++;
+          console.error(`Error categorizing ${doc.name} (attempt ${retries}):`, error);
+          
+          if (retries < MAX_RETRIES) {
+            // Longer backoff to handle rate limits better
+            const backoffDelay = 1000 * Math.pow(2, retries);
+            await new Promise(resolve => setTimeout(resolve, backoffDelay));
+          } else {
+            // Final fallback after all retries failed
+            results.push({
+              path: doc.path,
+              suggestedCategory: "other",
+              confidence: 0.3,
+              reasoning: "Error occurred during categorization after multiple attempts"
+            });
+            success = true; // Mark as success to continue processing
+          }
+        }
+      }
+    }
+    
+    // Delay between batches
+    if (i + BATCH_SIZE < documents.length) {
+      await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
     }
   }
   
   return results;
+}
+
+async function categorizeDocumentWithRetry(
+  fileName: string,
+  retryCount: number = 0
+): Promise<CategorySuggestion> {
+  try {
+    if (!GEMINI_API_KEY) {
+      console.warn("Gemini API key not found, using fallback categorization");
+      return fallbackCategorization(fileName);
+    }
+
+    const prompt = `
+You are an intelligent document categorization system for a digital locker application. 
+Analyze the following document information and categorize it into one of these main categories:
+
+Categories:
+1. education - Academic documents, certificates, transcripts, semester results, course materials, internship documents
+2. identity - ID documents, passports, licenses, birth certificates, address proofs
+3. financial - Bank statements, tax documents, investment papers, insurance, loan documents, salary slips
+4. medical - Medical reports, prescriptions, vaccination certificates, health insurance, medical bills
+5. legal - Contracts, legal notices, court documents, property papers, wills
+6. other - Any document that doesn't fit the above categories
+
+Document Information:
+- File Name: ${fileName}
+
+Please respond with a JSON object containing:
+{
+  "category": "main_category_name",
+  "confidence": confidence_score_0_to_1,
+  "reasoning": "brief_explanation_of_categorization",
+  "subcategory": "specific_subcategory_if_applicable"
+}
+
+Focus on accuracy and provide a confidence score based on how certain you are about the categorization.
+`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error(`Rate limit exceeded (attempt ${retryCount + 1})`);
+      }
+      throw new Error(`Gemini API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (!text) {
+      throw new Error("No response from Gemini AI");
+    }
+
+    // Parse the JSON response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const suggestion = JSON.parse(jsonMatch[0]);
+      
+      // Validate the category exists
+      if (!categoryMapping[suggestion.category as keyof typeof categoryMapping]) {
+        suggestion.category = "other";
+        suggestion.confidence = Math.max(0.3, suggestion.confidence - 0.2);
+        suggestion.reasoning += " (Fallback to 'other' category)";
+      }
+
+      return suggestion;
+    }
+
+    throw new Error("Invalid response format from Gemini AI");
+  } catch (error) {
+    console.error("Error categorizing document:", error);
+    
+    // For rate limit errors, throw to trigger retry
+    if (error.message.includes('Rate limit') || error.message.includes('429')) {
+      throw error;
+    }
+    
+    // For other errors, fallback immediately
+    return fallbackCategorization(fileName);
+  }
 }

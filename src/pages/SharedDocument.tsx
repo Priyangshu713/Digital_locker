@@ -7,6 +7,42 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
 import { Eye, Download, Lock, Clock, FileText, Loader2 } from 'lucide-react';
 
+// Add screenshot protection styles
+const screenshotProtectionStyles = `
+  @keyframes screenshot-protection {
+    0% { background-position: 0 0; }
+    100% { background-position: 40px 40px; }
+  }
+  
+  .screenshot-protected {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    -khtml-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-app-region: no-drag;
+  }
+  
+  .screenshot-protected::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 10px,
+      rgba(255, 255, 255, 0.01) 10px,
+      rgba(255, 255, 255, 0.01) 20px
+    );
+    pointer-events: none;
+    z-index: 999;
+  }
+`;
+
 interface SharedDocumentData {
   id: string;
   user_id: string;
@@ -30,6 +66,63 @@ const SharedDocument: React.FC = () => {
   const [passwordRequired, setPasswordRequired] = useState(false);
   const [password, setPassword] = useState('');
   const [verifyingPassword, setVerifyingPassword] = useState(false);
+
+  // Add screenshot protection CSS to document head
+  useEffect(() => {
+    const styleElement = document.createElement('style');
+    styleElement.textContent = screenshotProtectionStyles;
+    document.head.appendChild(styleElement);
+
+    // Screenshot detection and prevention
+    const preventScreenshot = () => {
+      // Detect screenshot attempts
+      document.addEventListener('keydown', (e) => {
+        // Prevent common screenshot shortcuts
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+          e.preventDefault();
+          toast({
+            title: "Screenshot Blocked",
+            description: "Screenshots are not allowed for this protected document.",
+            variant: "destructive"
+          });
+        }
+        // Prevent Print Screen
+        if (e.key === 'PrintScreen') {
+          e.preventDefault();
+          toast({
+            title: "Screenshot Blocked", 
+            description: "Screenshots are not allowed for this protected document.",
+            variant: "destructive"
+          });
+        }
+      });
+
+      // Detect when window loses focus (potential screenshot)
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          // Blur content when window is not visible
+          const protectedElements = document.querySelectorAll('.screenshot-protected');
+          protectedElements.forEach((el) => {
+            (el as HTMLElement).style.filter = 'blur(10px)';
+          });
+        } else {
+          // Restore content when window is visible
+          const protectedElements = document.querySelectorAll('.screenshot-protected');
+          protectedElements.forEach((el) => {
+            (el as HTMLElement).style.filter = 'none';
+          });
+        }
+      });
+    };
+
+    if (!shareData?.allow_download) {
+      preventScreenshot();
+    }
+
+    return () => {
+      document.head.removeChild(styleElement);
+    };
+  }, [shareData?.allow_download]);
 
   useEffect(() => {
     if (token) {
@@ -429,13 +522,111 @@ const SharedDocument: React.FC = () => {
         <Card className="bg-white shadow-lg max-w-full">
           <CardContent className="p-0">
             {documentUrl ? (
-              <div className="w-full h-[calc(100vh-180px)] overflow-hidden">
-                <iframe
-                  src={documentUrl}
-                  className="w-full h-full border-0 rounded-lg"
-                  title={getDocumentName()}
-                />
-              </div>
+              shareData?.allow_download ? (
+                <div className="w-full h-[calc(100vh-180px)] overflow-hidden">
+                  <iframe
+                    src={documentUrl}
+                    className="w-full h-full border-0 rounded-lg"
+                    title={getDocumentName()}
+                  />
+                </div>
+              ) : (
+                <div 
+                  className="w-full h-[calc(100vh-180px)] overflow-hidden relative screenshot-protected"
+                  style={{ 
+                    filter: 'none',
+                    WebkitFilter: 'none'
+                  }}
+                  onLoad={() => {
+                    // Apply screenshot protection
+                    const protectedDiv = document.querySelector('.screenshot-protected') as HTMLElement;
+                    if (protectedDiv) {
+                      protectedDiv.style.cssText += `
+                        -webkit-touch-callout: none;
+                        -webkit-user-select: none;
+                        -khtml-user-select: none;
+                        -moz-user-select: none;
+                        -ms-user-select: none;
+                        user-select: none;
+                        -webkit-app-region: no-drag;
+                        content-visibility: auto;
+                        contain: layout style paint;
+                      `;
+                    }
+                  }}
+                >
+                  <iframe
+                    src={`${documentUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                    className="w-full h-full border-0 rounded-lg screenshot-blocked"
+                    title={getDocumentName()}
+                    style={{
+                      filter: 'none',
+                      WebkitFilter: 'none'
+                    }}
+                    onLoad={() => {
+                      // Attempt to hide browser PDF controls and add screenshot protection
+                      try {
+                        const iframe = document.querySelector('iframe.screenshot-blocked') as HTMLIFrameElement;
+                        if (iframe && iframe.contentDocument) {
+                          const style = iframe.contentDocument.createElement('style');
+                          style.textContent = `
+                            .toolbar, .findbar, .secondaryToolbar { display: none !important; }
+                            .download, .print { display: none !important; }
+                            body, html, * { 
+                              -webkit-touch-callout: none !important;
+                              -webkit-user-select: none !important;
+                              -khtml-user-select: none !important;
+                              -moz-user-select: none !important;
+                              -ms-user-select: none !important;
+                              user-select: none !important;
+                              -webkit-app-region: no-drag !important;
+                            }
+                          `;
+                          iframe.contentDocument.head.appendChild(style);
+                        }
+                      } catch (e) {
+                        console.log('Cannot modify iframe content due to CORS');
+                      }
+                    }}
+                  />
+                  {/* Anti-screenshot overlay with dynamic content */}
+                  <div 
+                    className="absolute inset-0 bg-transparent pointer-events-none"
+                    onContextMenu={(e) => e.preventDefault()}
+                    style={{
+                      background: 'linear-gradient(45deg, transparent 49%, rgba(255,255,255,0.01) 50%, transparent 51%)',
+                      backgroundSize: '20px 20px',
+                      animation: 'screenshot-protection 2s linear infinite'
+                    }}
+                  />
+                  {/* Invisible watermark elements */}
+                  <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
+                    {Array.from({ length: 50 }, (_, i) => (
+                      <div
+                        key={i}
+                        className="absolute text-xs opacity-5 select-none"
+                        style={{
+                          top: `${Math.random() * 100}%`,
+                          left: `${Math.random() * 100}%`,
+                          transform: `rotate(${Math.random() * 360}deg)`,
+                          color: '#000000',
+                          fontSize: '8px',
+                          fontWeight: 'bold',
+                          zIndex: 1000,
+                          pointerEvents: 'none'
+                        }}
+                      >
+                        PROTECTED
+                      </div>
+                    ))}
+                  </div>
+                  {/* Warning message */}
+                  <div className="absolute top-4 right-4 bg-red-100 border border-red-300 text-red-800 px-3 py-2 rounded-lg text-sm z-50">
+                    <Lock className="w-4 h-4 inline mr-1" />
+                    Screenshot Protected
+                  </div>
+                </div>
+              )
             ) : (
               <div className="flex items-center justify-center h-96">
                 <div className="text-center">

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { listUserDocuments, moveToTrash, restoreFromTrash, listUserTrash, deletePermanent, getUserSmartFolders, getDocumentFolderAssignments, createSmartFolder, assignDocumentToFolder, uploadDocument, supabase } from '../lib/supabaseClient';
 import { useWebAuthn } from "@/hooks/useWebAuthn";
-import { Grid, List, Filter, Sparkles, Upload, Loader2, Folder, FolderOpen, Edit3, Check, X } from "lucide-react";
+import { Grid, List, Filter, Sparkles, Upload, Loader2, Folder, FolderOpen, Edit3, Check, X, Trash2 } from "lucide-react";
 import Header from "@/components/Header";
 import DocumentCard, { Document } from "@/components/DocumentCard";
 import TrashDocumentCard, { TrashDocument } from "@/components/TrashDocumentCard";
@@ -12,7 +12,6 @@ import BulkCategorizeDialog from "@/components/BulkCategorizeDialog";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { categorizeDocument, bulkCategorizeDocuments, getSubcategoryName, findBestMatchingFolder } from '../lib/geminiCategorization';
-import RenameDialog from '@/components/RenameDialog';
 import ShareDialog, { ShareSettings } from '@/components/ShareDialog';
 import '../styles/animations.css';
 import '../styles/toast-fix.css';
@@ -44,11 +43,7 @@ const Index = () => {
   const [persistentFolders, setPersistentFolders] = useState<any[]>([]);
   const [folderAssignments, setFolderAssignments] = useState<any[]>([]);
   
-  // Rename and Share dialog states
-  const [renameDialog, setRenameDialog] = useState<{ isOpen: boolean; document: Document | null }>({
-    isOpen: false,
-    document: null
-  });
+  // Share dialog state
   const [shareDialog, setShareDialog] = useState<{ isOpen: boolean; document: Document | null }>({
     isOpen: false,
     document: null
@@ -85,7 +80,7 @@ const Index = () => {
             name: d.name,
             type: d.name.split('.').pop() || 'unknown',
             category: d.category,
-            uploadDate: new Date(),
+            uploadDate: new Date(d.created_at),
             size: `${(d.size / (1024 * 1024)).toFixed(1)} MB`,
             url: d.publicUrl,
             path: d.path,
@@ -278,81 +273,6 @@ const Index = () => {
     }
   };
 
-  // Handle document rename
-  const handleRename = async (document: Document, newName: string) => {
-    if (!user) return;
-
-    try {
-      // Update document in Supabase storage
-      const oldPath = `${user.id}/${document.name}`;
-      const newPath = `${user.id}/${newName}`;
-
-      // Copy file to new location
-      const { data: fileData, error: downloadError } = await supabase.storage
-        .from('documents')
-        .download(oldPath);
-
-      if (downloadError) throw downloadError;
-
-      // Upload with new name
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(newPath, fileData, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      // Delete old file
-      const { error: deleteError } = await supabase.storage
-        .from('documents')
-        .remove([oldPath]);
-
-      if (deleteError) console.warn('Warning: Could not delete old file:', deleteError);
-
-      // Update document in state
-      setDocuments(prevDocs => 
-        prevDocs.map(doc => 
-          doc.id === document.id 
-            ? { ...doc, name: newName, path: newPath }
-            : doc
-        )
-      );
-
-      // Update smart folder assignments if needed
-      if (smartFoldersMode) {
-        const { error: updateError } = await supabase
-          .from('smart_folder_assignments')
-          .update({ document_path: newPath })
-          .eq('user_id', user.id)
-          .eq('document_path', oldPath);
-
-        if (updateError) console.warn('Warning: Could not update folder assignments:', updateError);
-
-        // Update smart folders state
-        setSmartFolders(prevFolders => {
-          const updatedFolders = { ...prevFolders };
-          Object.keys(updatedFolders).forEach(folderName => {
-            updatedFolders[folderName] = updatedFolders[folderName].map(doc =>
-              doc.id === document.id ? { ...doc, name: newName, path: newPath } : doc
-            );
-          });
-          return updatedFolders;
-        });
-      }
-
-      toast({
-        title: "Document Renamed",
-        description: `Successfully renamed to "${newName}"`,
-      });
-    } catch (error) {
-      console.error('Error renaming document:', error);
-      toast({
-        title: "Error",
-        description: "Failed to rename document. Please try again.",
-        variant: "destructive"
-      });
-      throw error;
-    }
-  };
 
   // Handle document sharing
   const handleShare = async (document: Document, shareSettings: ShareSettings): Promise<string> => {
@@ -705,6 +625,68 @@ const Index = () => {
       saveRename();
     } else if (e.key === 'Escape') {
       cancelRenaming();
+    }
+  };
+
+  const deleteEmptyFolder = async (folderName: string) => {
+    if (!user) return;
+    
+    const folderDocs = smartFolders[folderName] || [];
+    
+    // Only allow deletion of empty folders
+    if (folderDocs.length > 0) {
+      toast({
+        title: "Cannot delete folder",
+        description: "Only empty folders can be deleted. Please move or delete all documents first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Confirm deletion
+    if (!window.confirm(`Delete empty folder "${folderName}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      // Remove from database if it exists
+      const { error: deleteError } = await supabase
+        .from('smart_folders')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('folder_name', folderName);
+
+      if (deleteError) {
+        console.warn('Error deleting folder from database:', deleteError);
+      }
+
+      // Remove from local state
+      const updatedFolders = { ...smartFolders };
+      delete updatedFolders[folderName];
+      setSmartFolders(updatedFolders);
+
+      // Remove from expanded folders if it was expanded
+      const newExpanded = new Set(expandedFolders);
+      newExpanded.delete(folderName);
+      setExpandedFolders(newExpanded);
+
+      // Cancel editing if this folder was being edited
+      if (editingFolder === folderName) {
+        setEditingFolder(null);
+        setEditingName('');
+      }
+
+      toast({
+        title: "Folder deleted",
+        description: `Empty folder "${folderName}" has been deleted successfully.`
+      });
+    } catch (error) {
+      console.error('Error deleting folder:', error);
+      toast({
+        title: "Error",
+        description: "Failed to delete folder. Please try again.",
+        variant: "destructive"
+      });
     }
   };
 
@@ -1257,15 +1239,27 @@ Focus on grouping documents that likely come from the same source or serve simil
                                       } group-hover:text-blue-600`}>
                                         {folderName.replace(' Documents', '')}
                                       </p>
-                                      <button
-                                        onClick={(e) => startRenaming(folderName, e)}
-                                        className="absolute -top-1 -right-1 w-5 h-5 bg-gray-600 text-white rounded-full flex items-center justify-center opacity-0 group/name-hover:opacity-100 hover:bg-gray-700 transition-all duration-200 transform hover:scale-110"
-                                        title="Rename folder"
-                                      >
-                                        <Edit3 className="w-2.5 h-2.5" />
-                                      </button>
-                                      <p className="text-xs text-gray-500 mt-1">
+                                      <div className="absolute -top-1 -right-1 flex space-x-1">
+                                        <button
+                                          onClick={(e) => startRenaming(folderName, e)}
+                                          className="w-5 h-5 bg-gray-600 text-white rounded-full flex items-center justify-center hover:bg-gray-700 transition-all duration-200 transform hover:scale-110 opacity-0 group-hover/name:opacity-100"
+                                          title="Rename folder"
+                                        >
+                                          <Edit3 className="w-2.5 h-2.5" />
+                                        </button>
+                                        {folderDocs.length === 0 && (
+                                          <button
+                                            onClick={(e) => { e.stopPropagation(); deleteEmptyFolder(folderName); }}
+                                            className="w-5 h-5 bg-red-600 text-white rounded-full flex items-center justify-center hover:bg-red-700 transition-all duration-200 transform hover:scale-110"
+                                            title="Delete empty folder"
+                                          >
+                                            <Trash2 className="w-2.5 h-2.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                      <p className={`text-xs mt-1 ${folderDocs.length === 0 ? 'text-red-500 font-medium' : 'text-gray-500'}`}>
                                         {folderDocs.length} item{folderDocs.length !== 1 ? 's' : ''}
+                                        {folderDocs.length === 0 && ' (Empty)'}
                                       </p>
                                     </div>
                                   )}
@@ -1324,13 +1318,24 @@ Focus on grouping documents that likely come from the same source or serve simil
                                     <div className="group/header-name relative">
                                       <div className="flex items-center space-x-2">
                                         <h3 className="text-lg font-bold text-gray-900">{folderName}</h3>
-                                        <button
-                                          onClick={(e) => startRenaming(folderName, e)}
-                                          className="w-6 h-6 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center opacity-0 group-hover/header-name:opacity-100 hover:bg-gray-200 transition-all duration-200"
-                                          title="Rename folder"
-                                        >
-                                          <Edit3 className="w-3 h-3" />
-                                        </button>
+                                        <div className="flex space-x-1 opacity-0 group-hover/header-name:opacity-100 transition-all duration-200">
+                                          <button
+                                            onClick={(e) => startRenaming(folderName, e)}
+                                            className="w-6 h-6 bg-gray-100 text-gray-600 rounded-lg flex items-center justify-center hover:bg-gray-200 transition-all duration-200"
+                                            title="Rename folder"
+                                          >
+                                            <Edit3 className="w-3 h-3" />
+                                          </button>
+                                          {folderDocs.length === 0 && (
+                                            <button
+                                              onClick={(e) => { e.stopPropagation(); deleteEmptyFolder(folderName); }}
+                                              className="w-6 h-6 bg-red-100 text-red-600 rounded-lg flex items-center justify-center hover:bg-red-200 transition-all duration-200"
+                                              title="Delete empty folder"
+                                            >
+                                              <Trash2 className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                       <p className="text-sm text-gray-600">{folderDocs.length} document{folderDocs.length !== 1 ? 's' : ''}</p>
                                     </div>
@@ -1366,6 +1371,7 @@ Focus on grouping documents that likely come from the same source or serve simil
                                     onDownload={handleDownload}
                                     onPrint={handlePrint}
                                     onDelete={handleDelete}
+                                    onShare={(doc) => setShareDialog({ isOpen: true, document: doc })}
                                   />
                                 </div>
                               ))}
@@ -1446,7 +1452,6 @@ Focus on grouping documents that likely come from the same source or serve simil
                           onDownload={handleDownload}
                           onPrint={handlePrint}
                           onDelete={handleDelete}
-                          onRename={(doc) => setRenameDialog({ isOpen: true, document: doc })}
                           onShare={(doc) => setShareDialog({ isOpen: true, document: doc })}
                         />
                       </div>
@@ -1478,13 +1483,6 @@ Focus on grouping documents that likely come from the same source or serve simil
         onUpdateCategories={handleBulkCategoryUpdate}
       />
 
-      {/* Rename Dialog */}
-      <RenameDialog
-        isOpen={renameDialog.isOpen}
-        onClose={() => setRenameDialog({ isOpen: false, document: null })}
-        document={renameDialog.document}
-        onRename={handleRename}
-      />
 
       {/* Share Dialog */}
       <ShareDialog

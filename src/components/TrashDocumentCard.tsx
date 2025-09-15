@@ -116,7 +116,7 @@ const TrashDocumentCard = ({
   const daysRemaining = Math.max(0, 30 - daysInTrash);
   
   return (
-    <Card className="group hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-0 bg-gradient-to-br from-red-50 to-red-100/50 backdrop-blur-sm shadow-lg rounded-2xl overflow-hidden animate-fade-in">
+    <Card className="group hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-0 bg-gradient-to-br from-red-50 to-red-100/50 backdrop-blur-sm shadow-lg rounded-3xl overflow-hidden animate-fade-in">
       <CardContent className="p-0">
         {/* Document Preview Area */}
         <div className="relative h-40 bg-gray-100 overflow-hidden cursor-pointer" onClick={() => onView(document)}>

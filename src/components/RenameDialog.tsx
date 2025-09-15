@@ -32,6 +32,11 @@ const RenameDialog: React.FC<RenameDialogProps> = ({
 
   const handleRename = async () => {
     if (!document || !newName.trim()) return;
+    
+    // Prevent renaming private documents
+    if (document.category === 'private') {
+      return;
+    }
 
     setIsRenaming(true);
     try {
@@ -77,13 +82,19 @@ const RenameDialog: React.FC<RenameDialogProps> = ({
               placeholder="Enter new document name"
               className="w-full"
               autoFocus
+              disabled={document?.category === 'private'}
             />
+            {document?.category === 'private' && (
+              <p className="text-sm text-red-600 mt-1">
+                Private documents cannot be renamed
+              </p>
+            )}
           </div>
           
           {document && (
             <div className="text-sm text-gray-600">
               <p><strong>Current name:</strong> {document.name}</p>
-              <p><strong>File type:</strong> {document.type.toUpperCase()}</p>
+              <p><strong>File type:</strong> {document.type?.toUpperCase() || 'UNKNOWN'}</p>
             </div>
           )}
         </div>
@@ -98,7 +109,7 @@ const RenameDialog: React.FC<RenameDialogProps> = ({
           </Button>
           <Button
             onClick={handleRename}
-            disabled={isRenaming || !newName.trim()}
+            disabled={isRenaming || !newName.trim() || document?.category === 'private'}
             className="bg-blue-600 hover:bg-blue-700"
           >
             {isRenaming ? (

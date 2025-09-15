@@ -28,7 +28,6 @@ interface DocumentCardProps {
   onDownload: (doc: Document) => void;
   onPrint: (doc: Document) => void;
   onDelete: (id: string) => void;
-  onRename?: (doc: Document) => void;
   onShare?: (doc: Document) => void;
 }
 
@@ -133,11 +132,11 @@ const getPreviewContent = (document: Document) => {
   );
 };
 
-const DocumentCard = ({ document, onView, onDownload, onPrint, onDelete, onRename, onShare }: DocumentCardProps) => {
+const DocumentCard = ({ document, onView, onDownload, onPrint, onDelete, onShare }: DocumentCardProps) => {
   console.log('DocumentCard rendering for:', document.name, 'type:', document.type);
   
   return (
-    <Card className="group hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-0 bg-gradient-to-br from-white to-gray-50/50 backdrop-blur-sm shadow-lg rounded-2xl overflow-hidden animate-fade-in">
+    <Card className="group hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 border-0 bg-gradient-to-br from-white to-gray-50/50 backdrop-blur-sm shadow-lg rounded-3xl overflow-hidden animate-fade-in">
       <CardContent className="p-0">
         {/* Document Preview Area */}
         <div className="relative h-40 bg-gray-100 overflow-hidden cursor-pointer" onClick={() => onView(document)}>
@@ -194,19 +193,6 @@ const DocumentCard = ({ document, onView, onDownload, onPrint, onDelete, onRenam
                   <Printer className="w-4 h-4 mr-2" />
                   Print
                 </DropdownMenuItem>
-                {onRename && (
-                  <DropdownMenuItem 
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      onRename(document);
-                    }} 
-                    className="rounded-lg"
-                  >
-                    <Edit3 className="w-4 h-4 mr-2" />
-                    Rename
-                  </DropdownMenuItem>
-                )}
                 {onShare && (
                   <div className="relative">
                     <DropdownMenuItem 
@@ -276,7 +262,7 @@ const DocumentCard = ({ document, onView, onDownload, onPrint, onDelete, onRenam
                 variant="outline"
                 size="sm"
                 onClick={() => onView(document)}
-                className="h-9 px-4 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 rounded-xl transition-all hover:scale-105"
+                className="h-9 px-4 bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 rounded-2xl transition-all hover:scale-105"
               >
                 <Eye className="w-4 h-4 mr-1" />
                 <span className="hidden sm:inline">View</span>
@@ -285,7 +271,7 @@ const DocumentCard = ({ document, onView, onDownload, onPrint, onDelete, onRenam
                 variant="outline"
                 size="sm"
                 onClick={() => onDownload(document)}
-                className="h-9 px-4 bg-green-50 border-green-200 text-green-700 hover:bg-green-100 rounded-xl transition-all hover:scale-105"
+                className="h-9 px-4 bg-green-50 border-green-200 text-green-700 hover:bg-green-100 rounded-2xl transition-all hover:scale-105"
               >
                 <Download className="w-4 h-4 mr-1" />
                 <span className="hidden sm:inline">Download</span>

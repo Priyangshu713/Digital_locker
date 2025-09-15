@@ -91,7 +91,7 @@ export async function purgeOldTrash(userId: string, days = 30) {
   }
 }
 
-export async function listUserDocuments(userId: string): Promise<Array<{ name: string; path: string; publicUrl: string; size: number; category: string }>> {
+export async function listUserDocuments(userId: string): Promise<Array<{ name: string; path: string; publicUrl: string; size: number; category: string; created_at: string }>> {
   try {
     // List regular documents
     const { data: regularData, error: regularError } = await supabase.storage
@@ -133,6 +133,7 @@ export async function listUserDocuments(userId: string): Promise<Array<{ name: s
           publicUrl: pub.publicUrl,
           size: obj.metadata?.size || 0,
           category: category,
+          created_at: obj.created_at,
         };
       });
 
@@ -150,6 +151,7 @@ export async function listUserDocuments(userId: string): Promise<Array<{ name: s
           publicUrl: pub.publicUrl,
           size: obj.metadata?.size || 0,
           category: 'private', // Always set category to private for these
+          created_at: obj.created_at,
         };
       });
 
